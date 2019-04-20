@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/browser"
@@ -53,22 +54,24 @@ More info: https://github.com/codercom/sshcode
 
 	const codeServerPath = "/tmp/codessh-code-server"
 
-	// Downloads the latest code-server and allows it to be executed.
-	sshCmd := exec.Command("ssh",
-		"-tt",
-		host,
-		`/bin/bash -c 'set -euxo pipefail || exit 1
-wget -q https://codesrv-ci.cdr.sh/latest-linux -O `+codeServerPath+`
+	downloadScript := `/bin/bash -c 'set -euxo pipefail || exit 1
+wget -q https://codesrv-ci.cdr.sh/latest-linux -O ` + codeServerPath + `
 mkdir -p ~/.local/share/code-server
-cd `+filepath.Dir(codeServerPath)+`
+cd ` + filepath.Dir(codeServerPath) + `
 wget -N https://codesrv-ci.cdr.sh/latest-linux
-[ -f `+codeServerPath+` ] && rm `+codeServerPath+`
-ln latest-linux `+codeServerPath+`
-chmod +x `+codeServerPath+`
-'`,
+[ -f ` + codeServerPath + ` ] && rm ` + codeServerPath + `
+ln latest-linux ` + codeServerPath + `
+chmod +x ` + codeServerPath + `
+'`
+	// Downloads the latest code-server and allows it to be executed.
+	sshCmdStr := fmt.Sprintf("ssh" +
+		" -tt " + *sshFlags + " " +
+		host,
 	)
+	sshCmd := exec.Command("sh", "-c", sshCmdStr)
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
+	sshCmd.Stdin = strings.NewReader(downloadScript)
 	err := sshCmd.Run()
 	if err != nil {
 		flog.Fatal("failed to update code-server: %v", err)
@@ -77,14 +80,14 @@ chmod +x `+codeServerPath+`
 	if !(*skipSyncFlag) {
 		start := time.Now()
 		flog.Info("syncing settings")
-		err = syncUserSettings(host)
+		err = syncUserSettings(*sshFlags, host)
 		if err != nil {
 			flog.Fatal("failed to sync settings: %v", err)
 		}
 		flog.Info("synced settings in %s", time.Since(start))
 
 		flog.Info("syncing extensions")
-		err = syncExtensions(host)
+		err = syncExtensions(host, *sshFlags)
 		if err != nil {
 			flog.Fatal("failed to sync extensions: %v", err)
 		}
@@ -97,7 +100,7 @@ chmod +x `+codeServerPath+`
 		flog.Fatal("failed to find available port: %v", err)
 	}
 
-	sshCmdStr := fmt.Sprintf("ssh -tt -q -L %v %v %v 'cd %v; %v --host 127.0.0.1 --allow-http --no-auth --port=%v'",
+	sshCmdStr = fmt.Sprintf("ssh -tt -q -L %v %v %v 'cd %v; %v --host 127.0.0.1 --allow-http --no-auth --port=%v'",
 		localPort+":localhost:"+localPort, *sshFlags, host, dir, codeServerPath, localPort,
 	)
 
@@ -197,7 +200,7 @@ func randomPort() (string, error) {
 	return "", xerrors.Errorf("max number of tries exceeded: %d", maxTries)
 }
 
-func syncUserSettings(host string) error {
+func syncUserSettings(sshFlags string, host string) error {
 	localConfDir, err := configDir()
 	if err != nil {
 		return err
@@ -205,27 +208,27 @@ func syncUserSettings(host string) error {
 	const remoteSettingsDir = ".local/share/code-server/User"
 
 	// Append "/" to have rsync copy the contents of the dir.
-	return rsync(localConfDir+"/", remoteSettingsDir, host, "workspaceStorage", "logs", "CachedData")
+	return rsync(localConfDir+"/", remoteSettingsDir, sshFlags, host, "workspaceStorage", "logs", "CachedData")
 }
 
-func syncExtensions(host string) error {
+func syncExtensions(sshFlags string, host string) error {
 	localExtensionsDir, err := extensionsDir()
 	if err != nil {
 		return err
 	}
 	const remoteExtensionsDir = ".local/share/code-server/extensions"
 
-	return rsync(localExtensionsDir+"/", remoteExtensionsDir, host)
+	return rsync(localExtensionsDir+"/", remoteExtensionsDir, sshFlags, host)
 }
 
-func rsync(src string, dest string, host string, excludePaths ...string) error {
+func rsync(src string, dest string, sshFlags string, host string, excludePaths ...string) error {
 	remoteDest := fmt.Sprintf("%s:%s", host, dest)
 	excludeFlags := make([]string, len(excludePaths))
 	for i, path := range excludePaths {
 		excludeFlags[i] = "--exclude=" + path
 	}
 
-	cmd := exec.Command("rsync", append(excludeFlags, "-azv", "--copy-unsafe-links", src, remoteDest)...)
+	cmd := exec.Command("rsync", append(excludeFlags, "-e", "ssh "+sshFlags, "-azv", "--copy-unsafe-links", src, remoteDest)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
