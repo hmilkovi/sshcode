@@ -87,7 +87,7 @@ chmod +x ` + codeServerPath + `
 		flog.Info("synced settings in %s", time.Since(start))
 
 		flog.Info("syncing extensions")
-		err = syncExtensions(host, *sshFlags)
+		err = syncExtensions(*sshFlags, host)
 		if err != nil {
 			flog.Fatal("failed to sync extensions: %v", err)
 		}
