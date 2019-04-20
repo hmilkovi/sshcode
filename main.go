@@ -64,6 +64,9 @@ More info: https://github.com/codercom/sshcode
 		"-tt",
 		host,
 		`/bin/bash -c 'set -euxo pipefail || exit 1
+# Make sure any currently running code-server is gone so we can overwrite
+# the binary.
+pkill -9 `+filepath.Base(codeServerPath)+` || true
 wget -q https://codesrv-ci.cdr.sh/latest-linux -O `+codeServerPath+`
 mkdir -p ~/.local/share/code-server
 cd `+filepath.Dir(codeServerPath)+`
@@ -138,9 +141,10 @@ chmod +x `+codeServerPath+`
 	}
 
 	ctx, cancel = context.WithCancel(context.Background())
+	openBrowser(url)
+
 	go func() {
 		defer cancel()
-		openBrowser(url)
 		sshCmd.Wait()
 	}()
 
@@ -148,6 +152,7 @@ chmod +x `+codeServerPath+`
 	signal.Notify(c, os.Interrupt)
 
 	var shutdownWg sync.WaitGroup
+
 	shutdownWg.Add(1)
 	go func() {
 		defer shutdownWg.Done()
@@ -284,7 +289,17 @@ func rsync(src string, dest string, excludePaths ...string) error {
 		excludeFlags[i] = "--exclude=" + path
 	}
 
-	cmd := exec.Command("rsync", append(excludeFlags, "-azv", "--copy-unsafe-links", src, dest)...)
+	cmd := exec.Command("rsync", append(excludeFlags, "-az",
+		"--progress",
+		"--stats",
+		// Without --size-only, synchronizing back always results in a
+		// full copy. For some reason, rsync with --times doesn't actually
+		// change modification times on the destination.
+		"--size-only",
+		"--copy-unsafe-links",
+		src, dest,
+	)...,
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
