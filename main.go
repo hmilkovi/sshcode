@@ -80,17 +80,17 @@ chmod +x `+codeServerPath+`
 		flog.Fatal("failed to update code-server: %v", err)
 	}
 
-	if !(*skipSyncFlag) {
+	if !*skipSyncFlag {
 		start := time.Now()
 		flog.Info("syncing settings")
-		err = syncUserSettings(host)
+		err = syncUserSettings(host, false)
 		if err != nil {
 			flog.Fatal("failed to sync settings: %v", err)
 		}
 		flog.Info("synced settings in %s", time.Since(start))
 
 		flog.Info("syncing extensions")
-		err = syncExtensions(host)
+		err = syncExtensions(host, false)
 		if err != nil {
 			flog.Fatal("failed to sync extensions: %v", err)
 		}
@@ -137,7 +137,7 @@ chmod +x `+codeServerPath+`
 		break
 	}
 
-	ctx, cancel := context.WithCancel()
+	ctx, cancel = context.WithCancel(context.Background())
 	go func() {
 		defer cancel()
 		openBrowser(url)
@@ -160,6 +160,18 @@ chmod +x `+codeServerPath+`
 		if !*syncBack {
 			flog.Info("shutting down")
 			return
+		}
+
+		flog.Info("synchronizing VS Code back to local")
+
+		err = syncExtensions(host, true)
+		if err != nil {
+			flog.Fatal("failed to sync extensions back: %v", err)
+		}
+
+		err = syncUserSettings(host, true)
+		if err != nil {
+			flog.Fatal("failed to user settigns extensions back: %v", err)
 		}
 	}()
 
@@ -228,40 +240,56 @@ func randomPort() (string, error) {
 	return "", xerrors.Errorf("max number of tries exceeded: %d", maxTries)
 }
 
-func syncUserSettings(host string) error {
+func syncUserSettings(host string, back bool) error {
 	localConfDir, err := configDir()
 	if err != nil {
 		return err
 	}
 	const remoteSettingsDir = ".local/share/code-server/User"
 
+	var (
+		src  = localConfDir + "/"
+		dest = host + ":" + remoteSettingsDir
+	)
+
+	if back {
+		dest, src = src, dest
+	}
+
 	// Append "/" to have rsync copy the contents of the dir.
-	return rsync(localConfDir+"/", remoteSettingsDir, host, "workspaceStorage", "logs", "CachedData")
+	return rsync(src, dest, "workspaceStorage", "logs", "CachedData")
 }
 
-func syncExtensions(host string) error {
+func syncExtensions(host string, back bool) error {
 	localExtensionsDir, err := extensionsDir()
 	if err != nil {
 		return err
 	}
 	const remoteExtensionsDir = ".local/share/code-server/extensions"
 
-	return rsync(localExtensionsDir+"/", remoteExtensionsDir, host)
+	var (
+		src  = localExtensionsDir + "/"
+		dest = host + ":" + remoteExtensionsDir
+	)
+	if back {
+		dest, src = src, dest
+	}
+
+	return rsync(src, dest)
 }
 
-func rsync(src string, dest string, host string, excludePaths ...string) error {
-	remoteDest := fmt.Sprintf("%s:%s", host, dest)
+func rsync(src string, dest string, excludePaths ...string) error {
 	excludeFlags := make([]string, len(excludePaths))
 	for i, path := range excludePaths {
 		excludeFlags[i] = "--exclude=" + path
 	}
 
-	cmd := exec.Command("rsync", append(excludeFlags, "-azv", "--copy-unsafe-links", src, remoteDest)...)
+	cmd := exec.Command("rsync", append(excludeFlags, "-azv", "--copy-unsafe-links", src, dest)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
-		return xerrors.Errorf("failed to rsync '%s' to '%s': %w", src, remoteDest, err)
+		return xerrors.Errorf("failed to rsync '%s' to '%s': %w", src, dest, err)
 	}
 
 	return nil

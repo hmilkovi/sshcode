@@ -53,6 +53,6 @@ To disable this feature entirely, pass the `--skipsync` flag.
 
 ### Sync-back
 
-By default, extensions installed on the remote server won't be sync'd back
+By default, VS Code changes on the remote server won't be synced back
 when the connection closes. To synchronize back to local when the connection ends,
 pass the `-b` flag.
