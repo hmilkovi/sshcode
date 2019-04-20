@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pkg/browser"
@@ -24,8 +26,12 @@ func init() {
 }
 
 func main() {
-	skipSyncFlag := flag.Bool("skipsync", false, "skip syncing local settings and extensions to remote host")
-	sshFlags := flag.String("ssh-flags", "", "custom SSH flags")
+	var (
+		skipSyncFlag = flag.Bool("skipsync", false, "skip syncing local settings and extensions to remote host")
+		sshFlags     = flag.String("ssh-flags", "", "custom SSH flags")
+		syncBack     = flag.Bool("b", false, "sync extensions back on SIGINT")
+	)
+
 	flag.Usage = func() {
 		fmt.Printf(`Usage: [-skipsync] %v HOST [DIR] [SSH ARGS...]
 
@@ -131,8 +137,33 @@ chmod +x `+codeServerPath+`
 		break
 	}
 
-	openBrowser(url)
-	sshCmd.Wait()
+	ctx, cancel := context.WithCancel()
+	go func() {
+		defer cancel()
+		openBrowser(url)
+		sshCmd.Wait()
+	}()
+
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt)
+
+	var shutdownWg sync.WaitGroup
+	shutdownWg.Add(1)
+	go func() {
+		defer shutdownWg.Done()
+
+		select {
+		case <-ctx.Done():
+		case <-c:
+		}
+
+		if !*syncBack {
+			flog.Info("shutting down")
+			return
+		}
+	}()
+
+	shutdownWg.Wait()
 }
 
 func openBrowser(url string) {
