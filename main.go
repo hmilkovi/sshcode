@@ -250,7 +250,7 @@ func syncUserSettings(host string, back bool) error {
 	if err != nil {
 		return err
 	}
-	const remoteSettingsDir = ".local/share/code-server/User"
+	const remoteSettingsDir = ".local/share/code-server/User/"
 
 	var (
 		src  = localConfDir + "/"
@@ -270,7 +270,7 @@ func syncExtensions(host string, back bool) error {
 	if err != nil {
 		return err
 	}
-	const remoteExtensionsDir = ".local/share/code-server/extensions"
+	const remoteExtensionsDir = ".local/share/code-server/extensions/"
 
 	var (
 		src  = localExtensionsDir + "/"
@@ -289,13 +289,10 @@ func rsync(src string, dest string, excludePaths ...string) error {
 		excludeFlags[i] = "--exclude=" + path
 	}
 
-	cmd := exec.Command("rsync", append(excludeFlags, "-az",
-		"--progress",
-		"--stats",
-		// Without --size-only, synchronizing back always results in a
-		// full copy. For some reason, rsync with --times doesn't actually
-		// change modification times on the destination.
-		"--size-only",
+	cmd := exec.Command("rsync", append(excludeFlags, "-azvr",
+		// Only update newer directories, and sync times
+		// to keep things simple.
+		"-u", "--times",
 		"--copy-unsafe-links",
 		src, dest,
 	)...,
@@ -314,9 +311,9 @@ func configDir() (string, error) {
 	var path string
 	switch runtime.GOOS {
 	case "linux":
-		path = os.ExpandEnv("$HOME/.config/Code/User")
+		path = os.ExpandEnv("$HOME/.config/Code/User/")
 	case "darwin":
-		path = os.ExpandEnv("$HOME/Library/Application Support/Code/User")
+		path = os.ExpandEnv("$HOME/Library/Application Support/Code/User/")
 	default:
 		return "", xerrors.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
@@ -327,7 +324,7 @@ func extensionsDir() (string, error) {
 	var path string
 	switch runtime.GOOS {
 	case "linux", "darwin":
-		path = os.ExpandEnv("$HOME/.vscode/extensions")
+		path = os.ExpandEnv("$HOME/.vscode/extensions/")
 	default:
 		return "", xerrors.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
