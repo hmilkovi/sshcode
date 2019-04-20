@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pkg/browser"
@@ -29,7 +28,7 @@ func main() {
 	var (
 		skipSyncFlag = flag.Bool("skipsync", false, "skip syncing local settings and extensions to remote host")
 		sshFlags     = flag.String("ssh-flags", "", "custom SSH flags")
-		syncBack     = flag.Bool("b", false, "sync extensions back on SIGINT")
+		syncBack     = flag.Bool("b", false, "sync extensions back on termination")
 	)
 
 	flag.Usage = func() {
@@ -151,36 +150,27 @@ chmod +x `+codeServerPath+`
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt)
 
-	var shutdownWg sync.WaitGroup
+	select {
+	case <-ctx.Done():
+	case <-c:
+	}
 
-	shutdownWg.Add(1)
-	go func() {
-		defer shutdownWg.Done()
+	if !*syncBack {
+		flog.Info("shutting down")
+		return
+	}
 
-		select {
-		case <-ctx.Done():
-		case <-c:
-		}
+	flog.Info("synchronizing VS Code back to local")
 
-		if !*syncBack {
-			flog.Info("shutting down")
-			return
-		}
+	err = syncExtensions(host, true)
+	if err != nil {
+		flog.Fatal("failed to sync extensions back: %v", err)
+	}
 
-		flog.Info("synchronizing VS Code back to local")
-
-		err = syncExtensions(host, true)
-		if err != nil {
-			flog.Fatal("failed to sync extensions back: %v", err)
-		}
-
-		err = syncUserSettings(host, true)
-		if err != nil {
-			flog.Fatal("failed to user settigns extensions back: %v", err)
-		}
-	}()
-
-	shutdownWg.Wait()
+	err = syncUserSettings(host, true)
+	if err != nil {
+		flog.Fatal("failed to user settigns extensions back: %v", err)
+	}
 }
 
 func openBrowser(url string) {
